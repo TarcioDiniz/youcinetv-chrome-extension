@@ -37,15 +37,68 @@ interface ISerieDetails {
 interface ISerieService {
   getSerie(): Promise<SerieProgressDto>;
 
-  getVideo(): Promise<any>;
-
   nextEpisode(button: HTMLButtonElement): Promise<any>;
-
-  getVideoProgress(): Promise<VideoProgressDto>;
 
   saveEpisodeDetails(serieId: string, episodeDetails: EpisodeDetailsDto): Promise<void>;
 
   getEpisodeDetails(serieId: string): Promise<EpisodeDetailsDto>;
+}
+
+interface IVideoService {
+  getVideo(): Promise<any>;
+
+  getVideoProgress(): Promise<VideoProgressDto>;
+
+  continueEpisode(currentTime: string): Promise<any>;
+}
+
+class VideoService implements IVideoService {
+  getVideo(): Promise<any> {
+    const videoElement = document.querySelector('video');
+    return videoElement ? Promise.resolve(videoElement) : Promise.reject(new Error('Video element not found'));
+  }
+
+  async getVideoProgress(): Promise<VideoProgressDto> {
+    try {
+      const videoElement = await this.getVideo();
+
+      const isPaused = videoElement.paused;
+      const currentTime = videoElement.currentTime;
+      const duration = videoElement.duration;
+
+      const isFinished = currentTime >= duration;
+
+      return {
+        isPaused: isPaused,
+        currentTime: this.formatTime(currentTime),
+        duration: this.formatTime(duration),
+        isFinished: isFinished
+      };
+    } catch (error) {
+      return Promise.reject(error);
+    }
+  }
+
+  private formatTime(time: number): string {
+    const minutes = Math.floor(time / 60);
+    const seconds = Math.floor(time % 60);
+    return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
+  }
+
+  private parseTime(formattedTime: string): number {
+    const [minutes, seconds] = formattedTime.split(':').map(Number);
+    return minutes * 60 + seconds;
+  };
+
+
+  async continueEpisode(currentTime: string): Promise<any> {
+    let time = this.parseTime(currentTime);
+    let video = await this.getVideo();
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    video.currentTime = time;
+    video.play();
+  }
+
 }
 
 class SerieDetails implements ISerieDetails {
@@ -109,9 +162,11 @@ class SerieDetails implements ISerieDetails {
 
 class SerieService implements ISerieService {
   private serieDetails: ISerieDetails;
+  private videoService: IVideoService;
 
-  constructor(serieDetails: ISerieDetails = new SerieDetails()) {
+  constructor(serieDetails: ISerieDetails = new SerieDetails(), videoService: IVideoService = new VideoService()) {
     this.serieDetails = serieDetails;
+    this.videoService = videoService;
   }
 
   async nextEpisode(button: HTMLButtonElement): Promise<any> {
@@ -142,40 +197,7 @@ class SerieService implements ISerieService {
     }
   }
 
-  getVideo(): Promise<any> {
-    const videoElement = document.querySelector('video');
-    return videoElement ? Promise.resolve(videoElement) : Promise.reject(new Error('Video element not found'));
-  }
-
-  async getVideoProgress(): Promise<VideoProgressDto> {
-    try {
-      const videoElement = await this.getVideo();
-
-      const isPaused = videoElement.paused;
-      const currentTime = videoElement.currentTime;
-      const duration = videoElement.duration;
-
-      const formatTime = (time: number): string => {
-        const minutes = Math.floor(time / 60);
-        const seconds = Math.floor(time % 60);
-        return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
-      };
-
-      const isFinished = currentTime >= duration;
-
-      return {
-        isPaused: isPaused,
-        currentTime: formatTime(currentTime),
-        duration: formatTime(duration),
-        isFinished: isFinished
-      };
-    } catch (error) {
-      return Promise.reject(error);
-    }
-  }
-
   saveEpisodeDetails(serieId: string, episodeDetails: EpisodeDetailsDto): Promise<void> {
-    console.log('Salvando detalhes do episódio:', episodeDetails);
     localStorage.setItem(`currentEpisode-${serieId}`, JSON.stringify(episodeDetails));
     return Promise.resolve();
   }
@@ -196,42 +218,41 @@ class Application {
 
   private serieService: ISerieService;
   private serieDetails: ISerieDetails;
+  private videoService: IVideoService;
 
-  constructor(serieService: ISerieService = new SerieService(), serieDetails: ISerieDetails = new SerieDetails()) {
+  constructor(serieService: ISerieService = new SerieService(), serieDetails: ISerieDetails = new SerieDetails(), videoService: IVideoService = new VideoService()) {
+    this.videoService = videoService;
     this.serieService = serieService;
     this.serieDetails = serieDetails;
   }
 
-  async videoProgress() {
+  async getYourProgress() {
     const serie = await this.serieService.getSerie();
 
     try {
       const episodeDetails = await this.serieService.getEpisodeDetails(serie.serie.id);
 
-      console.log('Detalhes do episódio:', episodeDetails);
-
       if (episodeDetails && episodeDetails.isFinished) {
-        console.log('Episódio concluido');
-
         if (serie && serie.currentEpisode + 1 < serie.qtdEpisodes) {
-          console.log('Proximo episódio');
           const episode = serie.serie.episodes[episodeDetails.currentEpisode + 1];
           await this.serieService.nextEpisode(episode);
         }
       }
 
       if (episodeDetails && !episodeDetails.isFinished) {
-        console.log('Proximo não concluido');
         const episode = serie.serie.episodes[episodeDetails.currentEpisode];
         await this.serieService.nextEpisode(episode);
+        await this.videoService.continueEpisode(episodeDetails.currentTime);
       }
 
       const intervalId = setInterval(async () => {
-        let progress = await this.serieService.getVideoProgress();
+        let progress = await this.videoService.getVideoProgress();
         let episodes = await this.serieDetails.getEpisodes();
+        let currentEpisode = await this.serieDetails.getCurrentEpisode(episodes);
+        serie.currentEpisode = currentEpisode;
 
         const episodeDetails: EpisodeDetailsDto = {
-          currentEpisode: await this.serieDetails.getCurrentEpisode(episodes),
+          currentEpisode: currentEpisode,
           duration: progress.duration,
           currentTime: progress.currentTime,
           isFinished: progress.isFinished
@@ -245,17 +266,16 @@ class Application {
             await this.serieService.nextEpisode(episode);
           } else {
             clearInterval(intervalId);
-            console.log("Fim dos episódios ou condição não atendida");
           }
         }
       }, 5000);
 
     } catch (error) {
-      console.log(error);
+      console.error(error);
     }
   }
 }
 
 const application = new Application();
 
-application.videoProgress().then();
+application.getYourProgress().then();
