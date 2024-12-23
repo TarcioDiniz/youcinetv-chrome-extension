@@ -116,7 +116,6 @@ class SerieService implements ISerieService {
 
   async nextEpisode(button: HTMLButtonElement): Promise<any> {
     try {
-      button.click();
       await new Promise(resolve => setTimeout(resolve, 2000));
       button.click();
       return Promise.resolve();
@@ -241,8 +240,8 @@ class Application {
         await this.serieService.saveEpisodeDetails(serie.serie.id, episodeDetails);
 
         if (progress.isFinished) {
-          if (serie && serie.currentEpisode + 1 < serie.qtdEpisodes) {
-            const episode = serie.serie.episodes[serie.currentEpisode + 1];
+          if (serie && episodeDetails.currentEpisode + 1 < serie.qtdEpisodes) {
+            const episode = serie.serie.episodes[episodeDetails.currentEpisode + 1];
             await this.serieService.nextEpisode(episode);
           } else {
             clearInterval(intervalId);
