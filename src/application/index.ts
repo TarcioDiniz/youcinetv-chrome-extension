@@ -162,11 +162,9 @@ class SerieDetails implements ISerieDetails {
 
 class SerieService implements ISerieService {
   private serieDetails: ISerieDetails;
-  private videoService: IVideoService;
 
-  constructor(serieDetails: ISerieDetails = new SerieDetails(), videoService: IVideoService = new VideoService()) {
+  constructor(serieDetails: ISerieDetails = new SerieDetails()) {
     this.serieDetails = serieDetails;
-    this.videoService = videoService;
   }
 
   async nextEpisode(button: HTMLButtonElement): Promise<any> {
@@ -245,6 +243,11 @@ class Application {
         await this.videoService.continueEpisode(episodeDetails.currentTime);
       }
 
+    } catch (error) {
+      console.error(error);
+    }
+
+    try {
       const intervalId = setInterval(async () => {
         let progress = await this.videoService.getVideoProgress();
         let episodes = await this.serieDetails.getEpisodes();
@@ -269,7 +272,6 @@ class Application {
           }
         }
       }, 5000);
-
     } catch (error) {
       console.error(error);
     }
