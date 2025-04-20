@@ -50,6 +50,10 @@ interface IVideoService {
   getVideoProgress(): Promise<VideoProgressDto>;
 
   continueEpisode(currentTime: string): Promise<any>;
+
+  formatTime(time: number): string;
+
+  parseTime(formattedTime: string): number;
 }
 
 class VideoService implements IVideoService {
@@ -79,13 +83,14 @@ class VideoService implements IVideoService {
     }
   }
 
-  private formatTime(time: number): string {
+  formatTime(time: number): string {
     const minutes = Math.floor(time / 60);
     const seconds = Math.floor(time % 60);
     return `${minutes}:${seconds < 10 ? '0' : ''}${seconds}`;
   }
 
-  private parseTime(formattedTime: string): number {
+  // Total em segundos
+  parseTime(formattedTime: string): number {
     const [minutes, seconds] = formattedTime.split(':').map(Number);
     return minutes * 60 + seconds;
   };
@@ -212,6 +217,23 @@ class SerieService implements ISerieService {
 
 }
 
+class SeriesSettingsService {
+  static key(serieId: string) {
+    return `skipDelay-${serieId}`;
+  }
+
+  static getSkipDelay(serieId: string) {
+    const raw = localStorage.getItem(this.key(serieId)) || '0';
+    const secs = parseInt(raw, 10);
+    return isNaN(secs) ? 0 : secs;
+  }
+
+  static saveSkipDelay(serieId: string, secs: number) {
+    localStorage.setItem(this.key(serieId), String(Math.max(0, secs)));
+  }
+}
+
+
 class Application {
 
   private serieService: ISerieService;
@@ -224,8 +246,79 @@ class Application {
     this.serieDetails = serieDetails;
   }
 
+
+  addSettingsPanel(serieId: string) {
+    const panel = document.createElement('div');
+    Object.assign(panel.style, {
+      position: 'fixed',
+      bottom: '10px',
+      right: '10px',
+      backgroundColor: 'rgba(0,0,0,0.8)',
+      color: '#fff',
+      padding: '12px',
+      borderRadius: '6px',
+      zIndex: '9999',
+      fontSize: '14px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '6px',
+      width: '200px'
+    });
+
+    const title = document.createElement('div');
+    title.textContent = 'Skip Delay';
+    title.style.fontWeight = 'bold';
+    title.style.textAlign = 'center';
+
+    const sliderWrapper = document.createElement('div');
+    Object.assign(sliderWrapper.style, {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '8px'
+    });
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '0';
+    slider.max = '240';
+    slider.value = String(SeriesSettingsService.getSkipDelay(serieId));
+    slider.style.flex = '1';
+
+    const valueLabel = document.createElement('span');
+    valueLabel.textContent = slider.value + 's';
+    valueLabel.style.minWidth = '30px';
+    valueLabel.style.textAlign = 'right';
+
+    slider.addEventListener('input', () => {
+      valueLabel.textContent = slider.value + 's';
+    });
+
+    const btn = document.createElement('button');
+    btn.textContent = 'Salvar';
+    Object.assign(btn.style, {
+      padding: '6px',
+      borderRadius: '4px',
+      border: 'none',
+      cursor: 'pointer',
+      backgroundColor: '#4CAF50',
+      color: '#fff',
+      fontWeight: 'bold'
+    });
+    btn.addEventListener('click', () => {
+      const secs = Math.max(0, parseInt(slider.value, 10) || 0);
+      SeriesSettingsService.saveSkipDelay(serieId, secs);
+      btn.textContent = 'Salvo!';
+      setTimeout(() => (btn.textContent = 'Salvar'), 1000);
+    });
+
+    sliderWrapper.append(slider, valueLabel);
+    panel.append(title, sliderWrapper, btn);
+    document.body.appendChild(panel);
+  }
+
   async getYourProgress() {
     const serie = await this.serieService.getSerie();
+    this.addSettingsPanel(serie.serie.id);
 
     try {
       const episodeDetails = await this.serieService.getEpisodeDetails(serie.serie.id);
@@ -263,7 +356,9 @@ class Application {
 
         await this.serieService.saveEpisodeDetails(serie.serie.id, episodeDetails);
 
-        if (progress.isFinished) {
+        let endEpisode = this.videoService.parseTime(episodeDetails.duration) - this.videoService.parseTime(episodeDetails.currentTime);
+
+        if (progress.isFinished || endEpisode < SeriesSettingsService.getSkipDelay(serie.serie.id)) {
           if (serie && episodeDetails.currentEpisode + 1 < serie.qtdEpisodes) {
             const episode = serie.serie.episodes[episodeDetails.currentEpisode + 1];
             await this.serieService.nextEpisode(episode);
@@ -271,6 +366,7 @@ class Application {
             clearInterval(intervalId);
           }
         }
+
       }, 5000);
     } catch (error) {
       console.error(error);
